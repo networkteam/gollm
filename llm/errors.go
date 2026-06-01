@@ -2,6 +2,7 @@ package llm
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/teilomillet/gollm/utils"
 )
@@ -46,6 +47,19 @@ type LLMError struct {
 	Type    ErrorType // The category of the error
 	Message string    // A human-readable error message
 	Err     error     // The underlying error, if any
+
+	// Retryable reports whether retrying the request may succeed. It is set
+	// by the classifier for transient network failures and retryable HTTP
+	// statuses (408, 409, 429 rate limits, 5xx); permanent failures (most
+	// 4xx, exhausted quota) leave it false. The retry loop reads this field.
+	Retryable bool
+	// RetryAfter carries a server-provided minimum wait before the next
+	// attempt, parsed from Retry-After / retry-after-ms / rate-limit reset
+	// headers. Zero means "no server hint — use computed backoff".
+	RetryAfter time.Duration
+	// StatusCode is the HTTP status of an API error, or 0 when the error did
+	// not originate from an HTTP response.
+	StatusCode int
 }
 
 // LoggableFields returns a slice of interface{} containing error information
