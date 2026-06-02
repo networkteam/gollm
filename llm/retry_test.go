@@ -152,6 +152,27 @@ func TestRetryDelay(t *testing.T) {
 	if got := l.retryDelay(0, 30*time.Second); got != 30*time.Second {
 		t.Errorf("server floor: retryDelay(0, 30s) = %v, want 30s", got)
 	}
+
+	// Default config (the common caller path): RetryDelay <= 0 falls back to a
+	// 2s base, and MaxRetryDelay == 0 leaves backoff uncapped — so the bound
+	// grows as 2s*2^attempt with no ceiling.
+	t.Run("default config", func(t *testing.T) {
+		def := &LLMImpl{}
+		bounds := map[int]time.Duration{
+			0: 2 * time.Second,
+			1: 4 * time.Second,
+			2: 8 * time.Second,
+			3: 16 * time.Second,
+			4: 32 * time.Second,
+		}
+		for attempt, bound := range bounds {
+			for i := 0; i < 200; i++ {
+				if got := def.retryDelay(attempt, 0); got < 0 || got > bound {
+					t.Fatalf("default retryDelay(%d) = %v, want within [0, %v]", attempt, got, bound)
+				}
+			}
+		}
+	})
 }
 
 // --- loop integration: transient retries, permanent fails fast ---
@@ -257,5 +278,79 @@ func TestGenerateInsufficientQuotaFailsFast(t *testing.T) {
 	}
 	if rt.calls != 1 {
 		t.Errorf("calls = %d, want 1 (insufficient_quota is permanent)", rt.calls)
+	}
+}
+
+func TestGenerateRetriesRateLimitHonorsRetryAfter(t *testing.T) {
+	rt := &scriptedRT{steps: []func() (*http.Response, error){
+		func() (*http.Response, error) {
+			h := http.Header{}
+			h.Set("retry-after-ms", "60")
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     h,
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error"}}`)),
+			}, nil
+		},
+		resp(200, `ok`),
+	}}
+	l := newTestLLM(rt)
+	// Tiny base backoff so the server-provided 60ms Retry-After dominates.
+	l.RetryDelay = time.Millisecond
+	l.MaxRetryDelay = 10 * time.Second
+
+	start := time.Now()
+	got, err := l.Generate(context.Background(), &Prompt{Input: "hi"})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("expected success after rate-limit retry, got %v", err)
+	}
+	if got != "ok" {
+		t.Errorf("result = %q, want %q", got, "ok")
+	}
+	if rt.calls != 2 {
+		t.Errorf("calls = %d, want 2", rt.calls)
+	}
+	// The retry must have waited at least the header-derived 60ms, not the 1ms
+	// base backoff — proves the server hint is honored as the floor.
+	if elapsed < 60*time.Millisecond {
+		t.Errorf("elapsed %v, want >= 60ms (Retry-After honored over base backoff)", elapsed)
+	}
+}
+
+func TestWaitForCancellation(t *testing.T) {
+	l := &LLMImpl{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled before the wait begins
+
+	if err := l.waitFor(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Errorf("waitFor(1h) on cancelled ctx = %v, want context.Canceled", err)
+	}
+	// The non-positive fast path still observes cancellation.
+	if err := l.waitFor(ctx, 0); !errors.Is(err, context.Canceled) {
+		t.Errorf("waitFor(0) on cancelled ctx = %v, want context.Canceled", err)
+	}
+}
+
+func TestGenerateStopsRetryingOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	rt := &scriptedRT{steps: []func() (*http.Response, error){
+		func() (*http.Response, error) {
+			cancel() // cancel after the first retryable failure, before the wait
+			return resp(503, `boom`)()
+		},
+		resp(200, `ok`), // must never be reached
+	}}
+	l := newTestLLM(rt)
+	// Long backoff: without cancellation the wait would block well past the test.
+	l.RetryDelay = time.Hour
+	l.MaxRetryDelay = time.Hour
+
+	_, err := l.Generate(ctx, &Prompt{Input: "hi"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Generate = %v, want context.Canceled", err)
+	}
+	if rt.calls != 1 {
+		t.Errorf("calls = %d, want 1 (cancelled before retry)", rt.calls)
 	}
 }

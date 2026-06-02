@@ -149,16 +149,19 @@ func (l *LLMImpl) retryDelay(attempt int, serverDelay time.Duration) time.Durati
 		base = 2 * time.Second
 	}
 
+	// Cap the base first so attempt 0 honors MaxRetryDelay even when base
+	// alone exceeds it; the in-loop cap then both clamps growth and prevents
+	// the doubling from overflowing int64 at high attempt counts.
 	backoff := base
+	if l.MaxRetryDelay > 0 && backoff > l.MaxRetryDelay {
+		backoff = l.MaxRetryDelay
+	}
 	for i := 0; i < attempt; i++ {
 		backoff *= 2
 		if l.MaxRetryDelay > 0 && backoff > l.MaxRetryDelay {
 			backoff = l.MaxRetryDelay
 			break
 		}
-	}
-	if l.MaxRetryDelay > 0 && backoff > l.MaxRetryDelay {
-		backoff = l.MaxRetryDelay
 	}
 
 	// Full jitter: a uniformly random point in [0, backoff].

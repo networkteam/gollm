@@ -63,13 +63,25 @@ type LLMError struct {
 }
 
 // LoggableFields returns a slice of interface{} containing error information
-// in a format suitable for structured logging.
+// in a format suitable for structured logging. The classification fields
+// (status_code, retryable, retry_after) are appended only when meaningful, so
+// non-HTTP errors do not emit noisy zero-values.
 func (e *LLMError) LoggableFields() []interface{} {
-	return []interface{}{
+	fields := []interface{}{
 		"error_type", e.TypeString(),
 		"message", e.Message,
 		"error", e.Err,
 	}
+	if e.StatusCode != 0 {
+		fields = append(fields, "status_code", e.StatusCode)
+	}
+	if e.Retryable {
+		fields = append(fields, "retryable", e.Retryable)
+	}
+	if e.RetryAfter > 0 {
+		fields = append(fields, "retry_after", e.RetryAfter.String())
+	}
+	return fields
 }
 
 // Error implements the error interface.
