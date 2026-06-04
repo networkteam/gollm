@@ -20,6 +20,15 @@ type (
 	// It includes system messages, user messages, and optional components like tools and cache settings.
 	Prompt = llm.Prompt
 
+	// Response is a structured LLM response: generated text plus token usage
+	// (including the Anthropic prompt-cache read/creation breakdown) when the
+	// provider reports it. Returned by GenerateWithUsage.
+	Response = llm.Response
+
+	// Usage carries per-call token counts, including the prompt-cache
+	// read/creation split used for caching diagnostics.
+	Usage = llm.Usage
+
 	// CacheType defines how prompts should be cached in the system.
 	// Different cache types affect the persistence and availability of cached responses.
 	CacheType = llm.CacheType

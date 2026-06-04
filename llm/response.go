@@ -15,10 +15,22 @@ type Response struct {
 }
 
 // Usage contains token usage statistics for a response.
+//
+// PromptTokens/CompletionTokens/TotalTokens carry the OpenAI-style counts.
+// InputTokens/OutputTokens and the two Cache* fields carry the Anthropic-style
+// breakdown, including the prompt-cache read/creation split used for caching
+// diagnostics. Providers populate whichever set their API returns; callers that
+// need a single number should prefer the Anthropic fields and fall back to the
+// OpenAI ones (see usageFromResponseMap).
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 // HasToolCalls returns true if the response contains tool calls.

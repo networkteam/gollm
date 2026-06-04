@@ -28,6 +28,12 @@ type LLM interface {
 	// ErrorTypeAPI for provider API errors, or ErrorTypeResponse for response processing issues.
 	Generate(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (response string, err error)
 
+	// GenerateWithUsage behaves like Generate but returns the full Response,
+	// including token usage and the prompt-cache read/creation breakdown when
+	// the provider reports them. Use it when callers need per-call metrics
+	// rather than just the generated text.
+	GenerateWithUsage(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (*Response, error)
+
 	// GenerateWithSchema generates text that conforms to a specific JSON schema.
 	// Returns ErrorTypeInvalidInput for schema validation failures,
 	// or other error types as per Generate.
@@ -173,6 +179,23 @@ func (l *LLMImpl) SupportsJSONSchema() bool {
 //   - ErrorTypeResponse for response processing issues
 //   - ErrorTypeRateLimit if provider rate limit is exceeded
 func (l *LLMImpl) Generate(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (string, error) {
+	resp, err := l.generate(ctx, prompt, opts...)
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
+}
+
+// GenerateWithUsage behaves like Generate but returns the full Response,
+// including token usage and the prompt-cache read/creation breakdown when the
+// provider reports them.
+func (l *LLMImpl) GenerateWithUsage(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (*Response, error) {
+	return l.generate(ctx, prompt, opts...)
+}
+
+// generate runs the retry loop around a single attemptGenerate and returns the
+// full Response. Generate and GenerateWithUsage are thin wrappers over it.
+func (l *LLMImpl) generate(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (*Response, error) {
 	config := &GenerateConfig{}
 	for _, opt := range opts {
 		opt(config)
@@ -185,15 +208,15 @@ func (l *LLMImpl) Generate(ctx context.Context, prompt *Prompt, opts ...Generate
 	for attempt := 0; attempt <= l.MaxRetries; attempt++ {
 		l.logger.Debug("Generating text", "provider", l.Provider.Name(), "prompt", prompt.String(), "system_prompt", prompt.SystemPrompt, "attempt", attempt+1)
 		// Pass the entire Prompt struct to attemptGenerate
-		result, err := l.attemptGenerate(ctx, prompt)
+		resp, err := l.attemptGenerate(ctx, prompt)
 		if err == nil {
-			return result, nil
+			return resp, nil
 		}
 		lastErr = err
 
 		proceed, ctxErr := l.shouldRetry(ctx, attempt, err)
 		if ctxErr != nil {
-			return "", ctxErr
+			return nil, ctxErr
 		}
 		if !proceed {
 			break
@@ -201,7 +224,7 @@ func (l *LLMImpl) Generate(ctx context.Context, prompt *Prompt, opts ...Generate
 	}
 	// Surface the underlying error rather than masking it with an attempt
 	// count — callers classify on the typed error to decide what to do next.
-	return "", lastErr
+	return nil, lastErr
 }
 
 // attemptGenerate makes a single attempt to generate text using the provider.
@@ -213,7 +236,7 @@ func (l *LLMImpl) Generate(ctx context.Context, prompt *Prompt, opts ...Generate
 //   - ErrorTypeAPI for provider API errors
 //   - ErrorTypeResponse for response processing issues
 //   - ErrorTypeRateLimit if provider rate limit is exceeded
-func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt) (string, error) {
+func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt) (*Response, error) {
 	// Create a new options map that includes both l.Options and prompt-specific options
 	options := make(map[string]interface{})
 
@@ -272,13 +295,13 @@ func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt) (string, 
 	}
 
 	if err != nil {
-		return "", NewLLMError(ErrorTypeRequest, "failed to prepare request", err)
+		return nil, NewLLMError(ErrorTypeRequest, "failed to prepare request", err)
 	}
 
 	l.logger.Debug("Full request body", "body", string(reqBody))
 	req, err := http.NewRequestWithContext(ctx, "POST", l.Provider.Endpoint(), bytes.NewReader(reqBody))
 	if err != nil {
-		return "", NewLLMError(ErrorTypeRequest, "failed to create request", err)
+		return nil, NewLLMError(ErrorTypeRequest, "failed to create request", err)
 	}
 
 	l.logger.Debug("Full API request", "method", req.Method, "url", req.URL.String(), "headers", req.Header, "body", string(reqBody))
@@ -288,12 +311,12 @@ func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt) (string, 
 	}
 	resp, err := l.client.Do(req)
 	if err != nil {
-		return "", classifyNetworkError(err)
+		return nil, classifyNetworkError(err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", NewLLMError(ErrorTypeResponse, "failed to read response body", err)
+		return nil, NewLLMError(ErrorTypeResponse, "failed to read response body", err)
 	}
 
 	// Log the full API response
@@ -307,7 +330,7 @@ func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt) (string, 
 		} else {
 			l.logger.Error("API error", "provider", l.Provider.Name(), "status", resp.StatusCode, "body", string(body))
 		}
-		return "", apiErr
+		return nil, apiErr
 	}
 
 	// Extract and log caching information
@@ -337,10 +360,36 @@ func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt) (string, 
 
 	result, err := l.Provider.ParseResponse(body)
 	if err != nil {
-		return "", NewLLMError(ErrorTypeResponse, "failed to parse response", err)
+		return nil, NewLLMError(ErrorTypeResponse, "failed to parse response", err)
 	}
 	l.logger.Debug("Text generated successfully", "result", result)
-	return result, nil
+	return &Response{Content: result, Usage: usageFromResponseMap(fullResponse)}, nil
+}
+
+// usageFromResponseMap extracts token usage from a decoded provider response.
+// It reads both the OpenAI-style (prompt/completion/total) and Anthropic-style
+// (input/output plus cache read/creation) field names, populating whichever the
+// provider returned. Returns nil when the response carries no usage object.
+func usageFromResponseMap(full map[string]interface{}) *Usage {
+	raw, ok := full["usage"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	geti := func(k string) int {
+		if v, ok := raw[k].(float64); ok {
+			return int(v)
+		}
+		return 0
+	}
+	return &Usage{
+		PromptTokens:             geti("prompt_tokens"),
+		CompletionTokens:         geti("completion_tokens"),
+		TotalTokens:              geti("total_tokens"),
+		InputTokens:              geti("input_tokens"),
+		OutputTokens:             geti("output_tokens"),
+		CacheCreationInputTokens: geti("cache_creation_input_tokens"),
+		CacheReadInputTokens:     geti("cache_read_input_tokens"),
+	}
 }
 
 // GenerateWithSchema generates text that conforms to a specific JSON schema.

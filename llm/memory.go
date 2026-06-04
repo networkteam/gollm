@@ -274,6 +274,13 @@ func (l *LLMWithMemory) NewPrompt(input string) *Prompt {
 	return l.LLM.NewPrompt(input)
 }
 
+// GenerateWithUsage delegates to the wrapped LLM, returning the full Response
+// (text plus token/cache usage). Conversation-memory bookkeeping is not applied
+// on this path; use Generate when the history must be updated.
+func (l *LLMWithMemory) GenerateWithUsage(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (*Response, error) {
+	return l.LLM.GenerateWithUsage(ctx, prompt, opts...)
+}
+
 // GetLogger returns the logger from the wrapped LLM instance.
 func (l *LLMWithMemory) GetLogger() utils.Logger {
 	return l.LLM.GetLogger()

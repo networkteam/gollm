@@ -73,6 +73,16 @@ func NewMockLLM(provider *MockProvider, logger utils.Logger) *MockLLM {
 	}
 }
 
+// GenerateWithUsage satisfies the LLM interface for tests; it wraps Generate's
+// text in a Response with no usage data.
+func (l *MockLLM) GenerateWithUsage(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (*Response, error) {
+	text, err := l.Generate(ctx, prompt, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Response{Content: text}, nil
+}
+
 // Implement required LLM interface methods for testing
 func (l *MockLLM) Generate(ctx context.Context, prompt *Prompt, opts ...GenerateOption) (string, error) {
 	config := &GenerateConfig{}
