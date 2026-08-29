@@ -25,7 +25,7 @@ type OllamaProvider struct {
 	model string // Model identifier (e.g., "llama2", "mistral")
 	// extraHeaders are additional HTTP headers for requests
 	extraHeaders map[string]string // Additional HTTP headers
-	// apiKey authenticates hosted Ollama deployments (e.g. ollama.com);
+	// apiKey authenticates Ollama Cloud (ollama.com);
 	// empty for keyless local deployments
 	apiKey string
 	// options are model-specific options for the provider
@@ -37,10 +37,10 @@ type OllamaProvider struct {
 // NewOllamaProvider creates a new Ollama provider instance.
 // It initializes the provider with the specified endpoint URL and model name.
 // Local Ollama deployments need no API key; a non-empty apiKey is sent as a
-// Bearer token for hosted deployments such as ollama.com.
+// Bearer token for Ollama Cloud (ollama.com).
 //
 // Parameters:
-//   - apiKey: Bearer token for hosted deployments (empty for local)
+//   - apiKey: Bearer token for Ollama Cloud (empty for local)
 //   - model: The model to use (e.g., "llama2", "mistral")
 //   - extraHeaders: Additional HTTP headers for requests
 //
@@ -129,7 +129,7 @@ func (p *OllamaProvider) Headers() map[string]string {
 		headers[k] = v
 	}
 	// "ollama-local" is the placeholder SetAPIKey stores for keyless local
-	// deployments; only a real key authenticates a hosted deployment.
+	// deployments; a real key authenticates Ollama Cloud.
 	if p.apiKey != "" && p.apiKey != "ollama-local" && headers["Authorization"] == "" {
 		headers["Authorization"] = "Bearer " + p.apiKey
 	}

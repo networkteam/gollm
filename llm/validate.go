@@ -65,7 +65,7 @@ func validateAPIKey(fl validator.FieldLevel) bool {
 		if err != nil {
 			return false
 		}
-		// Hosted deployments require the Bearer token on the probe as well;
+		// Ollama Cloud requires the Bearer token on the probe as well;
 		// "ollama-local" is the keyless-local placeholder.
 		if key := apiKeys["ollama"]; key != "" && key != "ollama-local" {
 			req.Header.Set("Authorization", "Bearer "+key)
