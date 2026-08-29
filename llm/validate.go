@@ -61,7 +61,16 @@ func validateAPIKey(fl validator.FieldLevel) bool {
 		if endpoint == "" {
 			endpoint = "http://localhost:11434"
 		}
-		resp, err := http.Head(endpoint + "/api/tags")
+		req, err := http.NewRequest(http.MethodHead, endpoint+"/api/tags", nil)
+		if err != nil {
+			return false
+		}
+		// Hosted deployments require the Bearer token on the probe as well;
+		// "ollama-local" is the keyless-local placeholder.
+		if key := apiKeys["ollama"]; key != "" && key != "ollama-local" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return false
 		}

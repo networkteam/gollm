@@ -25,6 +25,9 @@ type OllamaProvider struct {
 	model string // Model identifier (e.g., "llama2", "mistral")
 	// extraHeaders are additional HTTP headers for requests
 	extraHeaders map[string]string // Additional HTTP headers
+	// apiKey authenticates hosted Ollama deployments (e.g. ollama.com);
+	// empty for keyless local deployments
+	apiKey string
 	// options are model-specific options for the provider
 	options map[string]interface{} // Model-specific options
 	// logger is the logger instance for this provider
@@ -33,10 +36,11 @@ type OllamaProvider struct {
 
 // NewOllamaProvider creates a new Ollama provider instance.
 // It initializes the provider with the specified endpoint URL and model name.
-// Note that Ollama typically doesn't require an API key, so the apiKey parameter is ignored.
+// Local Ollama deployments need no API key; a non-empty apiKey is sent as a
+// Bearer token for hosted deployments such as ollama.com.
 //
 // Parameters:
-//   - endpoint: The Ollama API endpoint URL (e.g., "http://localhost:11434")
+//   - apiKey: Bearer token for hosted deployments (empty for local)
 //   - model: The model to use (e.g., "llama2", "mistral")
 //   - extraHeaders: Additional HTTP headers for requests
 //
@@ -51,6 +55,7 @@ func NewOllamaProvider(apiKey, model string, extraHeaders map[string]string) Pro
 		endpoint:     endpoint,
 		model:        model,
 		extraHeaders: extraHeaders,
+		apiKey:       apiKey,
 		options:      make(map[string]interface{}),
 		logger:       utils.NewLogger(utils.LogLevelInfo),
 	}
@@ -117,9 +122,18 @@ func (p *OllamaProvider) SupportsJSONSchema() bool {
 // Headers returns the HTTP headers required for Ollama API requests.
 // This includes content type and any custom headers.
 func (p *OllamaProvider) Headers() map[string]string {
-	return map[string]string{
+	headers := map[string]string{
 		"Content-Type": "application/json",
 	}
+	for k, v := range p.extraHeaders {
+		headers[k] = v
+	}
+	// "ollama-local" is the placeholder SetAPIKey stores for keyless local
+	// deployments; only a real key authenticates a hosted deployment.
+	if p.apiKey != "" && p.apiKey != "ollama-local" && headers["Authorization"] == "" {
+		headers["Authorization"] = "Bearer " + p.apiKey
+	}
+	return headers
 }
 
 // PrepareRequest creates the request body for an Ollama API call.
