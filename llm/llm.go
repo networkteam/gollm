@@ -367,28 +367,41 @@ func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt) (*Respons
 }
 
 // usageFromResponseMap extracts token usage from a decoded provider response.
-// It reads both the OpenAI-style (prompt/completion/total) and Anthropic-style
-// (input/output plus cache read/creation) field names, populating whichever the
-// provider returned. Returns nil when the response carries no usage object.
+// It reads the OpenAI-style (prompt/completion/total) and Anthropic-style
+// (input/output plus cache read/creation) names from a usage object, and
+// Ollama's counts, which sit at the top level of the final response object
+// instead. Returns nil when the response reports no usage at all — an absence
+// stays an absence rather than becoming a zero that reads as a measurement.
 func usageFromResponseMap(full map[string]interface{}) *Usage {
-	raw, ok := full["usage"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	geti := func(k string) int {
-		if v, ok := raw[k].(float64); ok {
+	geti := func(m map[string]interface{}, k string) int {
+		if v, ok := m[k].(float64); ok {
 			return int(v)
 		}
 		return 0
 	}
+
+	if raw, ok := full["usage"].(map[string]interface{}); ok {
+		return &Usage{
+			PromptTokens:             geti(raw, "prompt_tokens"),
+			CompletionTokens:         geti(raw, "completion_tokens"),
+			TotalTokens:              geti(raw, "total_tokens"),
+			InputTokens:              geti(raw, "input_tokens"),
+			OutputTokens:             geti(raw, "output_tokens"),
+			CacheCreationInputTokens: geti(raw, "cache_creation_input_tokens"),
+			CacheReadInputTokens:     geti(raw, "cache_read_input_tokens"),
+		}
+	}
+
+	// Ollama names its counts prompt_eval_count and eval_count and puts them
+	// beside the generated text, on the object carrying done: true.
+	prompt, completion := geti(full, "prompt_eval_count"), geti(full, "eval_count")
+	if prompt == 0 && completion == 0 {
+		return nil
+	}
 	return &Usage{
-		PromptTokens:             geti("prompt_tokens"),
-		CompletionTokens:         geti("completion_tokens"),
-		TotalTokens:              geti("total_tokens"),
-		InputTokens:              geti("input_tokens"),
-		OutputTokens:             geti("output_tokens"),
-		CacheCreationInputTokens: geti("cache_creation_input_tokens"),
-		CacheReadInputTokens:     geti("cache_read_input_tokens"),
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+		TotalTokens:      prompt + completion,
 	}
 }
 

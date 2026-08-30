@@ -39,4 +39,24 @@ func TestUsageFromResponseMap(t *testing.T) {
 	if u2.PromptTokens != 100 || u2.CompletionTokens != 20 || u2.TotalTokens != 120 {
 		t.Errorf("openai parse wrong: %+v", u2)
 	}
+
+	// Ollama: counts at the top level of the final streamed object, with no
+	// usage object anywhere.
+	u3 := usageFromResponseMap(map[string]interface{}{
+		"model":             "glm-5.3-flash:cloud",
+		"done":              true,
+		"prompt_eval_count": float64(4210),
+		"eval_count":        float64(96),
+	})
+	if u3 == nil {
+		t.Fatal("expected usage")
+	}
+	if u3.PromptTokens != 4210 || u3.CompletionTokens != 96 || u3.TotalTokens != 4306 {
+		t.Errorf("ollama parse wrong: %+v", u3)
+	}
+
+	// A response with neither shape still reports nothing.
+	if usageFromResponseMap(map[string]interface{}{"done": true}) != nil {
+		t.Error("a response with no counts should yield nil")
+	}
 }
