@@ -334,7 +334,11 @@ func (p *Prompt) String() string {
 		builder.WriteString(fmt.Sprintf("\n\nPlease limit your response to approximately %d words.", p.MaxLength))
 	}
 
-	if len(p.Messages) > 0 {
+	// NewPrompt seeds Messages with the input as a single user message, so for
+	// a plain prompt Input and Messages are the same text in two shapes.
+	// Rendering both sent it twice to every provider that flattens through
+	// String() — Ollama among them — and billed the caller for the duplicate.
+	if len(p.Messages) > 0 && !isEchoOfInput(p) {
 		builder.WriteString("\nMessages:\n")
 		for _, msg := range p.Messages {
 			builder.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
@@ -345,6 +349,16 @@ func (p *Prompt) String() string {
 	}
 
 	return builder.String()
+}
+
+// isEchoOfInput reports whether Messages holds nothing but the single user
+// message NewPrompt derived from Input. A conversation with real turns renders
+// in full, as before.
+func isEchoOfInput(p *Prompt) bool {
+	return len(p.Messages) == 1 &&
+		p.Messages[0].Role == "user" &&
+		p.Messages[0].Content == p.Input &&
+		p.Messages[0].CacheType == ""
 }
 
 // Validate checks if the prompt configuration is valid according to
