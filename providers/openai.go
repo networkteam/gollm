@@ -74,6 +74,20 @@ func (p *OpenAIProvider) needsMaxCompletionTokens() bool {
 	return false
 }
 
+// supportsTemperature checks if the model accepts a non-default temperature.
+// Reasoning models (o-series, gpt-5 and newer, e.g. gpt-5.6-luna) reject any
+// value other than the default with HTTP 400, so the configured default must
+// not be sent to them. gpt-4o-class models still accept temperature.
+func (p *OpenAIProvider) supportsTemperature() bool {
+	if strings.HasPrefix(p.model, "o") {
+		return false
+	}
+	if strings.HasPrefix(p.model, "gpt-5") {
+		return false
+	}
+	return true
+}
+
 // SetOption sets a specific option for the OpenAI provider.
 // Supported options include:
 //   - temperature: Controls randomness (0.0 to 2.0)
@@ -106,7 +120,9 @@ func (p *OpenAIProvider) SetOption(key string, value interface{}) {
 // SetDefaultOptions configures standard options from the global configuration.
 // This includes temperature, max tokens, and sampling parameters.
 func (p *OpenAIProvider) SetDefaultOptions(config *config.Config) {
-	p.SetOption("temperature", config.Temperature)
+	if p.supportsTemperature() {
+		p.SetOption("temperature", config.Temperature)
+	}
 	p.SetOption("max_tokens", config.MaxTokens)
 	if config.Seed != nil {
 		p.SetOption("seed", *config.Seed)

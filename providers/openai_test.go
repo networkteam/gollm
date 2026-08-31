@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/teilomillet/gollm/config"
 )
 
 // TestNeedsMaxCompletionTokens verifies that the needsMaxCompletionTokens function
@@ -61,4 +63,41 @@ func TestPrepareRequestGPT5UsesMaxCompletionTokens(t *testing.T) {
 	assert.False(t, hasMaxTokens, "gpt-5 request must not send max_tokens (OpenAI rejects it with HTTP 400)")
 	assert.True(t, hasMaxCompletion, "gpt-5 request must send max_completion_tokens instead")
 	assert.Equal(t, float64(4096), maxCompletion, "token budget must be preserved across the conversion")
+}
+
+// TestDefaultTemperatureSkippedForReasoningModels verifies that the configured
+// default temperature is not sent to reasoning models (o-series, gpt-5.x) —
+// they reject any non-default temperature with HTTP 400 — while gpt-4-class
+// models keep receiving it.
+func TestDefaultTemperatureSkippedForReasoningModels(t *testing.T) {
+	testCases := []struct {
+		modelName      string
+		expectedResult bool
+		description    string
+	}{
+		{"gpt-4", true, "GPT-4 accepts temperature"},
+		{"gpt-4o", true, "GPT-4o accepts temperature"},
+		{"gpt-3.5-turbo", true, "GPT-3.5 Turbo accepts temperature"},
+		{"o1-preview", false, "o1 rejects non-default temperature"},
+		{"gpt-5", false, "GPT-5 rejects non-default temperature"},
+		{"gpt-5.6-luna", false, "GPT-5.6 Luna rejects non-default temperature"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			provider, ok := NewOpenAIProvider("fake-api-key", tc.modelName, nil).(*OpenAIProvider)
+			assert.True(t, ok, "Provider should be of type *OpenAIProvider")
+
+			provider.SetDefaultOptions(&config.Config{Temperature: 0.7, MaxTokens: 4096})
+
+			body, err := provider.PrepareRequest("hello", nil)
+			assert.NoError(t, err)
+
+			var req map[string]interface{}
+			assert.NoError(t, json.Unmarshal(body, &req))
+
+			_, hasTemperature := req["temperature"]
+			assert.Equal(t, tc.expectedResult, hasTemperature, "temperature presence unexpected for model %s", tc.modelName)
+		})
+	}
 }
