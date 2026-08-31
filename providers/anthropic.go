@@ -225,6 +225,12 @@ func (p *AnthropicProvider) PrepareRequest(prompt string, options map[string]int
 	// Add other options
 	for k, v := range options {
 		if k != "system_prompt" && k != "max_tokens" && k != "tools" && k != "tool_choice" && k != "enable_caching" && k != "images" {
+			// Anthropic nests the effort level under output_config; accept the
+			// flat option name so callers can treat it like any other knob.
+			if k == "effort" {
+				requestBody["output_config"] = map[string]interface{}{"effort": v}
+				continue
+			}
 			requestBody[k] = v
 		}
 	}
