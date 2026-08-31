@@ -40,6 +40,24 @@ func TestUsageFromResponseMap(t *testing.T) {
 		t.Errorf("openai parse wrong: %+v", u2)
 	}
 
+	// OpenAI cache hits: nested under prompt_tokens_details.cached_tokens.
+	u2c := usageFromResponseMap(map[string]interface{}{
+		"usage": map[string]interface{}{
+			"prompt_tokens":     float64(10248),
+			"completion_tokens": float64(56),
+			"total_tokens":      float64(10304),
+			"prompt_tokens_details": map[string]interface{}{
+				"cached_tokens": float64(9984),
+			},
+		},
+	})
+	if u2c == nil {
+		t.Fatal("expected usage")
+	}
+	if u2c.CacheReadInputTokens != 9984 {
+		t.Errorf("openai cached_tokens not read as cache reads: %+v", u2c)
+	}
+
 	// Ollama: counts at the top level of the final streamed object, with no
 	// usage object anywhere.
 	u3 := usageFromResponseMap(map[string]interface{}{

@@ -381,7 +381,7 @@ func usageFromResponseMap(full map[string]interface{}) *Usage {
 	}
 
 	if raw, ok := full["usage"].(map[string]interface{}); ok {
-		return &Usage{
+		u := &Usage{
 			PromptTokens:             geti(raw, "prompt_tokens"),
 			CompletionTokens:         geti(raw, "completion_tokens"),
 			TotalTokens:              geti(raw, "total_tokens"),
@@ -390,6 +390,14 @@ func usageFromResponseMap(full map[string]interface{}) *Usage {
 			CacheCreationInputTokens: geti(raw, "cache_creation_input_tokens"),
 			CacheReadInputTokens:     geti(raw, "cache_read_input_tokens"),
 		}
+		// OpenAI reports automatic prompt-cache hits nested under
+		// prompt_tokens_details.cached_tokens instead of a top-level field.
+		if u.CacheReadInputTokens == 0 {
+			if details, ok := raw["prompt_tokens_details"].(map[string]interface{}); ok {
+				u.CacheReadInputTokens = geti(details, "cached_tokens")
+			}
+		}
+		return u
 	}
 
 	// Ollama names its counts prompt_eval_count and eval_count and puts them
