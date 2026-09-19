@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/teilomillet/gollm/config"
 	"github.com/teilomillet/gollm/types"
@@ -87,24 +86,7 @@ func (p *VLLMProvider) Name() string {
 // It normalizes the endpoint to ensure proper formatting.
 // Accepts: http://host:port, http://host:port/v1, or http://host:port/v1/chat/completions
 func (p *VLLMProvider) Endpoint() string {
-	endpoint := p.endpoint
-
-	// Remove trailing slash if present
-	if len(endpoint) > 0 && endpoint[len(endpoint)-1] == '/' {
-		endpoint = endpoint[:len(endpoint)-1]
-	}
-
-	// If full path already provided, return as-is
-	if strings.HasSuffix(endpoint, "/chat/completions") {
-		return endpoint
-	}
-
-	// Ensure endpoint ends with /v1 if not already present
-	if !strings.HasSuffix(endpoint, "/v1") {
-		endpoint = endpoint + "/v1"
-	}
-
-	return endpoint + "/chat/completions"
+	return chatCompletionsURL(p.endpoint)
 }
 
 // SupportsJSONSchema indicates that vLLM supports JSON schema validation

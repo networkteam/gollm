@@ -19,6 +19,7 @@ import (
 type OpenAIProvider struct {
 	apiKey       string                 // API key for authentication
 	model        string                 // Model identifier (e.g., "gpt-4", "gpt-4o-mini")
+	endpoint     string                 // Base URL of an OpenAI-compatible service; empty means OpenAI
 	extraHeaders map[string]string      // Additional HTTP headers
 	options      map[string]interface{} // Model-specific options
 	logger       utils.Logger           // Logger instance
@@ -45,6 +46,13 @@ func NewOpenAIProvider(apiKey, model string, extraHeaders map[string]string) Pro
 		options:      make(map[string]interface{}),
 		logger:       utils.NewLogger(utils.LogLevelInfo),
 	}
+}
+
+// SetEndpoint configures the base URL of an OpenAI-compatible service, such as
+// a gateway; Endpoint appends the chat completions path to it. Empty restores
+// the public OpenAI endpoint.
+func (p *OpenAIProvider) SetEndpoint(endpoint string) {
+	p.endpoint = endpoint
 }
 
 // SetLogger configures the logger for the OpenAI provider.
@@ -127,6 +135,9 @@ func (p *OpenAIProvider) SetDefaultOptions(config *config.Config) {
 	if config.Seed != nil {
 		p.SetOption("seed", *config.Seed)
 	}
+	if config.OpenAIEndpoint != "" {
+		p.SetEndpoint(config.OpenAIEndpoint)
+	}
 	p.logger.Debug("Default options set", "temperature", config.Temperature, "max_tokens", config.MaxTokens, "seed", config.Seed)
 }
 
@@ -135,10 +146,14 @@ func (p *OpenAIProvider) Name() string {
 	return "openai"
 }
 
-// Endpoint returns the OpenAI API endpoint URL.
-// For API version 1, this is "https://api.openai.com/v1/chat/completions".
+// Endpoint returns the chat completions URL: the public OpenAI one, or the
+// configured base URL of an OpenAI-compatible service with the same path
+// appended.
 func (p *OpenAIProvider) Endpoint() string {
-	return "https://api.openai.com/v1/chat/completions"
+	if p.endpoint == "" {
+		return "https://api.openai.com/v1/chat/completions"
+	}
+	return chatCompletionsURL(p.endpoint)
 }
 
 // SupportsJSONSchema indicates that OpenAI supports native JSON schema validation

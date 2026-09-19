@@ -101,3 +101,58 @@ func TestDefaultTemperatureSkippedForReasoningModels(t *testing.T) {
 		})
 	}
 }
+
+// TestOpenAIEndpoint verifies that the provider targets OpenAI by default and
+// an OpenAI-compatible service when a base URL is configured, whichever of the
+// accepted URL forms names it.
+func TestOpenAIEndpoint(t *testing.T) {
+	testCases := []struct {
+		name             string
+		endpoint         string
+		expectedEndpoint string
+	}{
+		{
+			name:             "unset endpoint targets OpenAI",
+			endpoint:         "",
+			expectedEndpoint: "https://api.openai.com/v1/chat/completions",
+		},
+		{
+			name:             "host only",
+			endpoint:         "https://gateway.example/openai",
+			expectedEndpoint: "https://gateway.example/openai/v1/chat/completions",
+		},
+		{
+			name:             "base URL already has /v1",
+			endpoint:         "https://gateway.example/openai/v1",
+			expectedEndpoint: "https://gateway.example/openai/v1/chat/completions",
+		},
+		{
+			name:             "base URL with /v1 and trailing slash",
+			endpoint:         "https://gateway.example/openai/v1/",
+			expectedEndpoint: "https://gateway.example/openai/v1/chat/completions",
+		},
+		{
+			name:             "full path already provided",
+			endpoint:         "https://gateway.example/openai/v1/chat/completions",
+			expectedEndpoint: "https://gateway.example/openai/v1/chat/completions",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := NewOpenAIProvider("fake-api-key", "gpt-4o-mini", nil).(*OpenAIProvider)
+			provider.SetEndpoint(tc.endpoint)
+
+			assert.Equal(t, tc.expectedEndpoint, provider.Endpoint())
+		})
+	}
+}
+
+// TestOpenAIEndpointFromConfig verifies that the configured base URL reaches
+// the provider through the default options, the path NewLLM composes.
+func TestOpenAIEndpointFromConfig(t *testing.T) {
+	provider := NewOpenAIProvider("fake-api-key", "gpt-4o-mini", nil).(*OpenAIProvider)
+	provider.SetDefaultOptions(&config.Config{OpenAIEndpoint: "https://gateway.example/openai"})
+
+	assert.Equal(t, "https://gateway.example/openai/v1/chat/completions", provider.Endpoint())
+}

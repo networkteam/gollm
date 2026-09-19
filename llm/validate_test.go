@@ -4,6 +4,8 @@ import (
 	"errors"
 	"sync"
 	"testing"
+
+	"github.com/teilomillet/gollm/config"
 )
 
 // testStruct is a simple struct for validation testing
@@ -168,5 +170,56 @@ func TestDefaultValidate(t *testing.T) {
 
 	if err := DefaultValidate(invalid); err == nil {
 		t.Error("expected invalid struct to fail")
+	}
+}
+
+// TestValidateOpenAIAPIKeyAgainstCustomEndpoint covers the keys an
+// OpenAI-compatible service issues: OpenAI's own sk- format is required only
+// while requests actually go to OpenAI.
+func TestValidateOpenAIAPIKeyAgainstCustomEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		apiKey   string
+		wantErr  bool
+	}{
+		{
+			name:    "openai key without endpoint",
+			apiKey:  "sk-aaaaaaaaaaaaaaaaaaaaaa",
+			wantErr: false,
+		},
+		{
+			name:    "foreign key without endpoint is rejected",
+			apiKey:  "op-notarealkeyaaaaaaaaaa",
+			wantErr: true,
+		},
+		{
+			name:     "foreign key with endpoint is accepted",
+			endpoint: "https://gateway.example/openai",
+			apiKey:   "op-notarealkeyaaaaaaaaaa",
+			wantErr:  false,
+		},
+		{
+			name:     "empty key stays rejected with endpoint",
+			endpoint: "https://gateway.example/openai",
+			apiKey:   "",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Provider:       "openai",
+				Model:          "gpt-4o-mini",
+				OpenAIEndpoint: tt.endpoint,
+				APIKeys:        map[string]string{"openai": tt.apiKey},
+			}
+
+			err := Validate(cfg)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

@@ -80,6 +80,7 @@ var (
 	SetModel          = config.SetModel          // Sets the model name for the selected provider
 	SetOllamaEndpoint = config.SetOllamaEndpoint // Sets the endpoint URL for Ollama local deployment
 	SetVLLMEndpoint   = config.SetVLLMEndpoint   // Sets the endpoint URL for vLLM local deployment
+	SetOpenAIEndpoint = config.SetOpenAIEndpoint // Sets the base URL of an OpenAI-compatible service
 	SetAPIKey         = config.SetAPIKey         // Sets the API key for the current provider
 
 	// Generation parameters

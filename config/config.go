@@ -29,6 +29,7 @@ type MemoryOption struct {
 //   - LLM_PROVIDER: LLM provider name (default: "anthropic")
 //   - LLM_MODEL: Model name (default: "claude-3-opus-20240229")
 //   - OLLAMA_ENDPOINT: Ollama API endpoint (default: "http://localhost:11434")
+//   - OPENAI_ENDPOINT: Base URL of an OpenAI-compatible service (default: OpenAI)
 //   - LLM_TEMPERATURE: Generation temperature (default: 0.7)
 //   - LLM_MAX_TOKENS: Maximum tokens to generate (default: 100)
 //   - LLM_TOP_P: Top-p sampling parameter (default: 0.9)
@@ -55,6 +56,7 @@ type Config struct {
 	Model                 string            `env:"LLM_MODEL" envDefault:"claude-3-5-haiku-latest" validate:"required"`
 	OllamaEndpoint        string            `env:"OLLAMA_ENDPOINT" envDefault:"http://localhost:11434"`
 	VLLMEndpoint          string            `env:"VLLM_ENDPOINT" envDefault:"http://localhost:8000"`
+	OpenAIEndpoint        string            `env:"OPENAI_ENDPOINT"`
 	Temperature           float64           `env:"LLM_TEMPERATURE" envDefault:"0.7" validate:"gte=0,lte=1"`
 	MaxTokens             int               `env:"LLM_MAX_TOKENS" envDefault:"100"`
 	TopP                  float64           `env:"LLM_TOP_P" envDefault:"0.9" validate:"gte=0,lte=1"`
@@ -194,6 +196,14 @@ func SetOllamaEndpoint(endpoint string) ConfigOption {
 func SetVLLMEndpoint(endpoint string) ConfigOption {
 	return func(c *Config) {
 		c.VLLMEndpoint = endpoint
+	}
+}
+
+// SetOpenAIEndpoint sets the base URL of an OpenAI-compatible service, such as
+// a gateway. Empty keeps the public OpenAI endpoint.
+func SetOpenAIEndpoint(endpoint string) ConfigOption {
+	return func(c *Config) {
+		c.OpenAIEndpoint = endpoint
 	}
 }
 

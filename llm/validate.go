@@ -95,6 +95,11 @@ func validateAPIKey(fl validator.FieldLevel) bool {
 	// Validate key format based on provider
 	switch provider {
 	case "openai":
+		// A configured base URL means the request does not go to OpenAI, so
+		// OpenAI's key format says nothing about the key's validity.
+		if parent.FieldByName("OpenAIEndpoint").String() != "" {
+			return true
+		}
 		return strings.HasPrefix(apiKey, "sk-") && len(apiKey) > 20
 	case "anthropic":
 		return strings.HasPrefix(apiKey, "sk-ant-") && len(apiKey) > 20
