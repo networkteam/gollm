@@ -223,3 +223,22 @@ func TestValidateOpenAIAPIKeyAgainstCustomEndpoint(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateOpenAIAPIKeyWithoutEndpointField guards the key check against a
+// struct that has no OpenAIEndpoint field: reflect yields an invalid Value
+// whose String() is non-empty, which would read as a configured endpoint and
+// wave the key through.
+func TestValidateOpenAIAPIKeyWithoutEndpointField(t *testing.T) {
+	type endpointlessConfig struct {
+		Provider string            `validate:"required"`
+		APIKeys  map[string]string `validate:"required,apikey"`
+	}
+
+	err := Validate(&endpointlessConfig{
+		Provider: "openai",
+		APIKeys:  map[string]string{"openai": "not-an-openai-key"},
+	})
+	if err == nil {
+		t.Error("expected a malformed OpenAI key to fail validation, got nil")
+	}
+}
