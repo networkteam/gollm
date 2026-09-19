@@ -1,3 +1,4 @@
+// Package providers implements LLM provider interfaces and implementations.
 package providers
 
 import "strings"
