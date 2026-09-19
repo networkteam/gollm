@@ -56,7 +56,7 @@ type Config struct {
 	Model                 string            `env:"LLM_MODEL" envDefault:"claude-3-5-haiku-latest" validate:"required"`
 	OllamaEndpoint        string            `env:"OLLAMA_ENDPOINT" envDefault:"http://localhost:11434"`
 	VLLMEndpoint          string            `env:"VLLM_ENDPOINT" envDefault:"http://localhost:8000"`
-	OpenAIEndpoint        string            `env:"OPENAI_ENDPOINT"`
+	OpenAIEndpoint        string            `env:"OPENAI_ENDPOINT" validate:"omitempty,url"`
 	Temperature           float64           `env:"LLM_TEMPERATURE" envDefault:"0.7" validate:"gte=0,lte=1"`
 	MaxTokens             int               `env:"LLM_MAX_TOKENS" envDefault:"100"`
 	TopP                  float64           `env:"LLM_TOP_P" envDefault:"0.9" validate:"gte=0,lte=1"`

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -240,5 +241,43 @@ func TestValidateOpenAIAPIKeyWithoutEndpointField(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected a malformed OpenAI key to fail validation, got nil")
+	}
+}
+
+// TestValidateOpenAIEndpoint covers the endpoint itself. NewLLM validates the
+// config, so a typo such as a missing scheme is named as a config error at
+// construction; unchecked it reaches the request builder instead, surfacing as
+// an unsupported-protocol-scheme failure far from its cause.
+func TestValidateOpenAIEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		wantErr  bool
+	}{
+		{name: "unset keeps the public OpenAI endpoint", endpoint: ""},
+		{name: "base URL", endpoint: "https://gateway.example/openai"},
+		{name: "base URL with /v1", endpoint: "https://gateway.example/openai/v1"},
+		{name: "local service", endpoint: "http://localhost:8000"},
+		{name: "host without scheme", endpoint: "gateway.example", wantErr: true},
+		{name: "leading whitespace", endpoint: " https://gateway.example", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Provider:       "openai",
+				Model:          "gpt-4o-mini",
+				OpenAIEndpoint: tt.endpoint,
+				APIKeys:        map[string]string{"openai": "sk-aaaaaaaaaaaaaaaaaaaaaa"},
+			}
+
+			err := Validate(cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), "OpenAIEndpoint") {
+				t.Errorf("error should name the offending field, got %v", err)
+			}
+		})
 	}
 }
