@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 
 	"github.com/teilomillet/gollm/config"
@@ -95,7 +96,11 @@ func (p *OpenAIProvider) SetDefaultOptions(config *config.Config) {
 	if config.TemperatureSet {
 		p.SetOption("temperature", config.Temperature)
 	}
-	p.SetOption("max_tokens", config.MaxTokens)
+	// No cap at all leaves the model's own output limit in force, which a
+	// reasoning model needs: its thinking counts against the same cap.
+	if config.MaxTokens > 0 {
+		p.SetOption("max_tokens", config.MaxTokens)
+	}
 	if config.Seed != nil {
 		p.SetOption("seed", *config.Seed)
 	}
@@ -118,6 +123,21 @@ func (p *OpenAIProvider) Endpoint() string {
 		return "https://api.openai.com/v1/chat/completions"
 	}
 	return chatCompletionsURL(p.endpoint)
+}
+
+// systemRole returns the role the system prompt is sent under. OpenAI's own API
+// takes "developer"; OpenAI-compatible services often accept only the classic
+// roles and reject "developer" with HTTP 400, so any other endpoint gets
+// "system", which OpenAI also accepts behind a proxy.
+func (p *OpenAIProvider) systemRole() string {
+	if p.endpoint == "" {
+		return "developer"
+	}
+	endpointURL, err := url.Parse(p.endpoint)
+	if err == nil && strings.EqualFold(endpointURL.Hostname(), "api.openai.com") {
+		return "developer"
+	}
+	return "system"
 }
 
 // SupportsJSONSchema indicates that OpenAI supports native JSON schema validation
@@ -171,10 +191,9 @@ func (p *OpenAIProvider) PrepareRequest(prompt string, options map[string]interf
 		"messages": []map[string]interface{}{},
 	}
 
-	// Handle system prompt as developer message
 	if systemPrompt, ok := options["system_prompt"].(string); ok && systemPrompt != "" {
 		request["messages"] = append(request["messages"].([]map[string]interface{}), map[string]interface{}{
-			"role":    "developer",
+			"role":    p.systemRole(),
 			"content": systemPrompt,
 		})
 	}

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,6 +61,13 @@ type LLMError struct {
 	// StatusCode is the HTTP status of an API error, or 0 when the error did
 	// not originate from an HTTP response.
 	StatusCode int
+	// ProviderType, ProviderCode and ProviderMessage carry the error the
+	// provider reported in the response body ({"error":{"type", "code",
+	// "message"}}), so a caller can tell one 400 from another. Empty when the
+	// body carried no such envelope.
+	ProviderType    string
+	ProviderCode    string
+	ProviderMessage string
 }
 
 // LoggableFields returns a slice of interface{} containing error information
@@ -91,7 +99,14 @@ func (e *LLMError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s (%s): %v", e.TypeString(), e.Message, e.Err)
 	}
-	return fmt.Sprintf("%s: %s", e.TypeString(), e.Message)
+	message := e.Message
+	if e.ProviderMessage != "" {
+		message = fmt.Sprintf("%s: %s", message, e.ProviderMessage)
+	}
+	if e.ProviderCode != "" {
+		message = fmt.Sprintf("%s (%s)", message, e.ProviderCode)
+	}
+	return fmt.Sprintf("%s: %s", e.TypeString(), message)
 }
 
 // Unwrap returns the underlying error.
@@ -166,4 +181,34 @@ func HandleError(err error, fatal bool, logger utils.Logger) {
 		// Consider using os.Exit(1) here or returning an error to let the caller decide
 		panic(err)
 	}
+}
+
+var errEmptyAnswer = errors.New("empty answer")
+
+// NoAnswerError reports a response the provider delivered whole that holds no
+// answer the provider could parse: typically a reasoning model that spent the
+// output token cap thinking. It carries why the model stopped and what it
+// spent, so a caller can tell a cap from a provider fault.
+type NoAnswerError struct {
+	FinishReason string
+	// Usage is nil when the provider reported none.
+	Usage *Usage
+	Err   error
+}
+
+func (e *NoAnswerError) Error() string {
+	reasoning := 0
+	if e.Usage != nil {
+		reasoning = e.Usage.ReasoningTokens
+	}
+	return fmt.Sprintf("%v (finish_reason=%s, reasoning %d tokens)", e.Err, e.FinishReason, reasoning)
+}
+
+func (e *NoAnswerError) Unwrap() error {
+	return e.Err
+}
+
+// Truncated reports whether the model stopped at the output token cap.
+func (e *NoAnswerError) Truncated() bool {
+	return finishedAtCap(e.FinishReason)
 }

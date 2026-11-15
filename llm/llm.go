@@ -337,7 +337,10 @@ func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt, responseS
 			// Transient — log quietly so a batch of retries does not flood.
 			l.logger.Debug("Retryable API error", "provider", l.Provider.Name(), "status", resp.StatusCode, "retry_after", apiErr.RetryAfter.String())
 		} else {
-			l.logger.Error("API error", "provider", l.Provider.Name(), "status", resp.StatusCode, "body", string(body))
+			// Permanent — the returned error carries the provider's code and
+			// message, so the caller decides whether it is worth reporting; a
+			// caller that recovers from it must not leave an error in the log.
+			l.logger.Debug("API error", "provider", l.Provider.Name(), "status", resp.StatusCode, "body", string(body))
 		}
 		return nil, apiErr
 	}
@@ -367,12 +370,39 @@ func (l *LLMImpl) attemptGenerate(ctx context.Context, prompt *Prompt, responseS
 		l.logger.Debug("Cache information not available in the response")
 	}
 
+	usage := usageFromResponseMap(fullResponse)
+	finishReason := finishReasonFromResponseMap(fullResponse)
 	result, err := l.Provider.ParseResponse(body)
+	if err == nil && result == "" && finishReason != "" {
+		err = errEmptyAnswer
+	}
 	if err != nil {
+		if finishReason != "" {
+			err = &NoAnswerError{FinishReason: finishReason, Usage: usage, Err: err}
+		}
 		return nil, NewLLMError(ErrorTypeResponse, "failed to parse response", err)
 	}
 	l.logger.Debug("Text generated successfully", "result", result)
-	return &Response{Content: result, Usage: usageFromResponseMap(fullResponse)}, nil
+	return &Response{Content: result, Usage: usage, FinishReason: finishReason}, nil
+}
+
+// finishReasonFromResponseMap reads why the model stopped from a decoded
+// provider response: OpenAI's choices[0].finish_reason, Anthropic's
+// stop_reason or Ollama's done_reason.
+func finishReasonFromResponseMap(full map[string]interface{}) string {
+	if choices, ok := full["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]interface{}); ok {
+			if reason, ok := choice["finish_reason"].(string); ok {
+				return reason
+			}
+		}
+	}
+	for _, key := range []string{"stop_reason", "done_reason"} {
+		if reason, ok := full[key].(string); ok {
+			return reason
+		}
+	}
+	return ""
 }
 
 // promptText renders the prompt for the request's user content. A provider
@@ -421,6 +451,13 @@ func usageFromResponseMap(full map[string]interface{}) *Usage {
 		if u.CacheReadInputTokens == 0 {
 			if details, ok := raw["prompt_tokens_details"].(map[string]interface{}); ok {
 				u.CacheReadInputTokens = geti(details, "cached_tokens")
+			}
+		}
+		// Chat Completions nests reasoning under completion_tokens_details,
+		// the Responses API under output_tokens_details.
+		for _, key := range []string{"completion_tokens_details", "output_tokens_details"} {
+			if details, ok := raw[key].(map[string]interface{}); ok && u.ReasoningTokens == 0 {
+				u.ReasoningTokens = geti(details, "reasoning_tokens")
 			}
 		}
 		return u
@@ -534,8 +571,8 @@ func (l *LLMImpl) attemptGenerateWithSchema(ctx context.Context, prompt string, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		l.logger.Error("API error", "provider", l.Provider.Name(), "status", resp.StatusCode, "body", string(body))
-		return "", fullPrompt, NewLLMError(ErrorTypeAPI, fmt.Sprintf("API error: status code %d", resp.StatusCode), nil)
+		l.logger.Debug("API error", "provider", l.Provider.Name(), "status", resp.StatusCode, "body", string(body))
+		return "", fullPrompt, classifyAPIError(resp.StatusCode, resp.Header, body)
 	}
 
 	result, err := l.Provider.ParseResponse(body)
@@ -615,8 +652,13 @@ func (l *LLMImpl) Stream(ctx context.Context, prompt *Prompt, opts ...StreamOpti
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		errorBody, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, NewLLMError(ErrorTypeAPI, fmt.Sprintf("API error: status code %d", resp.StatusCode), nil)
+		if readErr != nil {
+			return nil, NewLLMError(ErrorTypeResponse, "failed to read error response body", readErr)
+		}
+		l.logger.Debug("API error", "provider", l.Provider.Name(), "status", resp.StatusCode, "body", string(errorBody))
+		return nil, classifyAPIError(resp.StatusCode, resp.Header, errorBody)
 	}
 
 	// Create and return stream
